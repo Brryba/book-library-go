@@ -10,11 +10,19 @@ import (
 
 var ErrNotFound = errors.New("author not found")
 
-type Service struct {
-	repo *Repository
+type repository interface {
+	FindAll(ctx context.Context) ([]Author, error)
+	FindByID(ctx context.Context, id uuid.UUID) (*Author, error)
+	Create(ctx context.Context, req CreateRequest) (*Author, error)
+	Update(ctx context.Context, id uuid.UUID, req UpdateRequest) (*Author, error)
+	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-func NewService(repo *Repository) *Service {
+type Service struct {
+	repo repository
+}
+
+func NewService(repo repository) *Service {
 	return &Service{repo: repo}
 }
 
