@@ -11,6 +11,7 @@ import (
 
 	"book-library-go/config"
 	"book-library-go/internal/author"
+	"book-library-go/internal/book"
 )
 
 func main() {
@@ -26,8 +27,12 @@ func main() {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 
+	bookRepo := book.NewRepository(db)
+	bookService := book.NewService(bookRepo)
+	bookHandler := book.NewHandler(bookService)
+
 	authorRepo := author.NewRepository(db)
-	authorService := author.NewService(authorRepo)
+	authorService := author.NewService(authorRepo, bookService)
 	authorHandler := author.NewHandler(authorService)
 
 	r := chi.NewRouter()
@@ -35,6 +40,7 @@ func main() {
 	r.Use(middleware.Recoverer)
 
 	r.Route("/authors", authorHandler.Routes)
+	r.Route("/authors/{authorID}/books", bookHandler.Routes)
 
 	log.Printf("server started on port %s", cfg.Port)
 	log.Fatal(http.ListenAndServe(":"+cfg.Port, r))
