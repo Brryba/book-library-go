@@ -22,6 +22,7 @@ func NewHandler(service *Service) *Handler {
 func (h *Handler) Routes(r chi.Router) {
 	r.Get("/", h.getAll)
 	r.Post("/", h.create)
+	r.Get("/with-books", h.getAllWithBooks)
 	r.Get("/{id}", h.getByID)
 	r.Put("/{id}", h.update)
 	r.Delete("/{id}", h.delete)
@@ -29,6 +30,15 @@ func (h *Handler) Routes(r chi.Router) {
 
 func (h *Handler) getAll(w http.ResponseWriter, r *http.Request) {
 	authors, err := h.service.GetAll(r.Context())
+	if err != nil {
+		middleware.WriteError(w, http.StatusInternalServerError, err)
+		return
+	}
+	middleware.WriteJSON(w, http.StatusOK, authors)
+}
+
+func (h *Handler) getAllWithBooks(w http.ResponseWriter, r *http.Request) {
+	authors, err := h.service.GetAllWithBooks(r.Context())
 	if err != nil {
 		middleware.WriteError(w, http.StatusInternalServerError, err)
 		return

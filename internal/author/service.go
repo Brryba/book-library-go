@@ -6,6 +6,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+
+	"book-library-go/internal/book"
 )
 
 var ErrNotFound = errors.New("author not found")
@@ -19,15 +21,47 @@ type repository interface {
 }
 
 type Service struct {
-	repo repository
+	repo        repository
+	bookService *book.Service
 }
 
-func NewService(repo repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo repository, bookService *book.Service) *Service {
+	return &Service{repo: repo, bookService: bookService}
 }
 
 func (s *Service) GetAll(ctx context.Context) ([]Author, error) {
 	return s.repo.FindAll(ctx)
+}
+
+func (s *Service) GetAllWithBooks(ctx context.Context) ([]AuthorWithBooks, error) {
+	authors, err := s.repo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	ids := make([]uuid.UUID, len(authors))
+	for i, a := range authors {
+		ids[i] = a.ID
+	}
+
+	books, err := s.bookService.GetByAuthorIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+
+	booksByAuthor := make(map[uuid.UUID][]book.Book)
+	for _, b := range books {
+		booksByAuthor[b.AuthorID] = append(booksByAuthor[b.AuthorID], b)
+	}
+
+	result := make([]AuthorWithBooks, len(authors))
+	for i, a := range authors {
+		result[i] = AuthorWithBooks{
+			Author: a,
+			Books:  booksByAuthor[a.ID],
+		}
+	}
+	return result, nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*Author, error) {
