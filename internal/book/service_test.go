@@ -11,11 +11,16 @@ import (
 )
 
 type mockRepository struct {
-	books []book.Book
-	err   error
+	books         []book.Book
+	err           error
+	findAllCalled bool
+	createCalled  bool
+	deleteCalled  bool
+	updateCalled  bool
 }
 
 func (m *mockRepository) FindAll(ctx context.Context) ([]book.Book, error) {
+	m.findAllCalled = true
 	return m.books, m.err
 }
 
@@ -34,14 +39,15 @@ func (m *mockRepository) FindByAuthorIDs(ctx context.Context, authorIDs []uuid.U
 }
 
 func (m *mockRepository) Create(ctx context.Context, authorID uuid.UUID, req book.CreateRequest) (*book.Book, error) {
+	m.createCalled = true
 	if m.err != nil {
 		return nil, m.err
 	}
-	b := &book.Book{Title: req.Title, Year: req.Year}
-	return b, nil
+	return &book.Book{Title: req.Title, Year: req.Year}, nil
 }
 
 func (m *mockRepository) Update(ctx context.Context, id uuid.UUID, req book.UpdateRequest) (*book.Book, error) {
+	m.updateCalled = true
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -49,55 +55,149 @@ func (m *mockRepository) Update(ctx context.Context, id uuid.UUID, req book.Upda
 }
 
 func (m *mockRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	m.deleteCalled = true
 	return m.err
 }
 
-func TestCreate_EmptyTitle(t *testing.T) {
-	svc := book.NewService(&mockRepository{})
+type mockCache struct {
+	data             []book.Book
+	addCalled        bool
+	invalidateCalled bool
+}
 
-	_, err := svc.Create(context.Background(), uuid.New(), book.CreateRequest{Title: ""})
+func (m *mockCache) Get(key string) ([]book.Book, bool) {
+	if m.data != nil {
+		return m.data, true
+	}
+	return nil, false
+}
+
+func (m *mockCache) Add(key string, value []book.Book) {
+	m.addCalled = true
+	m.data = value
+}
+
+func (m *mockCache) Invalidate(key string) {
+	m.invalidateCalled = true
+	m.data = nil
+}
+
+func (m *mockCache) Close() {}
+
+func newTestService(repo *mockRepository, c *mockCache) *book.Service {
+	return book.NewService(repo, c)
+}
+
+func TestGetAll_CacheHit(t *testing.T) {
+	repo := &mockRepository{}
+	c := &mockCache{data: []book.Book{{Title: "1984"}}}
+
+	books, err := newTestService(repo, c).GetAll(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(books) != 1 {
+		t.Errorf("expected 1 book, got %d", len(books))
+	}
+	if repo.findAllCalled {
+		t.Fatal("repository should not be called on cache hit")
+	}
+}
+
+func TestGetAll_CacheMiss(t *testing.T) {
+	repo := &mockRepository{books: []book.Book{{Title: "1984"}}}
+	c := &mockCache{}
+
+	books, err := newTestService(repo, c).GetAll(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(books) != 1 {
+		t.Errorf("expected 1 book, got %d", len(books))
+	}
+	if !repo.findAllCalled {
+		t.Fatal("repository should be called on cache miss")
+	}
+	if !c.addCalled {
+		t.Fatal("cache Add should be called after repo fetch")
+	}
+}
+
+func TestCreate_EmptyTitle(t *testing.T) {
+	repo := &mockRepository{}
+	_, err := newTestService(repo, &mockCache{}).Create(context.Background(), uuid.New(), book.CreateRequest{Title: ""})
 	if err == nil {
-		t.Fatal("expected error for empty title, got nil")
+		t.Fatal("expected error for empty title")
+	}
+	if repo.createCalled {
+		t.Fatal("repository should not be called")
 	}
 }
 
 func TestCreate_InvalidYear(t *testing.T) {
-	svc := book.NewService(&mockRepository{})
-
-	_, err := svc.Create(context.Background(), uuid.New(), book.CreateRequest{Title: "1984", Year: 0})
+	repo := &mockRepository{}
+	_, err := newTestService(repo, &mockCache{}).Create(context.Background(), uuid.New(), book.CreateRequest{Title: "1984", Year: 0})
 	if err == nil {
-		t.Fatal("expected error for invalid year, got nil")
+		t.Fatal("expected error for invalid year")
+	}
+	if repo.createCalled {
+		t.Fatal("repository should not be called")
 	}
 }
 
-func TestCreate_Success(t *testing.T) {
-	svc := book.NewService(&mockRepository{})
-
-	b, err := svc.Create(context.Background(), uuid.New(), book.CreateRequest{Title: "1984", Year: 1949})
+func TestCreate_InvalidatesCache(t *testing.T) {
+	c := &mockCache{}
+	_, err := newTestService(&mockRepository{}, c).Create(context.Background(), uuid.New(), book.CreateRequest{Title: "1984", Year: 1949})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if b.Title != "1984" {
-		t.Errorf("expected title 1984, got %s", b.Title)
+	if !c.invalidateCalled {
+		t.Fatal("cache Invalidate should be called after create")
 	}
 }
 
-func TestGetByID_NotFound(t *testing.T) {
-	svc := book.NewService(&mockRepository{})
-
-	_, err := svc.GetByID(context.Background(), uuid.New())
+func TestUpdate_EmptyTitle(t *testing.T) {
+	repo := &mockRepository{books: []book.Book{{Title: "1984"}}}
+	_, err := newTestService(repo, &mockCache{}).Update(context.Background(), uuid.New(), book.UpdateRequest{Title: ""})
 	if err == nil {
-		t.Fatal("expected error, got nil")
+		t.Fatal("expected error for empty title")
+	}
+	if repo.updateCalled {
+		t.Fatal("repository should not be called")
 	}
 }
 
-func TestDelete_Success(t *testing.T) {
-	svc := book.NewService(&mockRepository{
-		books: []book.Book{{Title: "1984"}},
-	})
-
-	err := svc.Delete(context.Background(), uuid.New())
+func TestUpdate_InvalidatesCache(t *testing.T) {
+	repo := &mockRepository{books: []book.Book{{Title: "1984", Year: 1949}}}
+	c := &mockCache{}
+	_, err := newTestService(repo, c).Update(context.Background(), uuid.New(), book.UpdateRequest{Title: "Animal Farm", Year: 1945})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.invalidateCalled {
+		t.Fatal("cache Invalidate should be called after update")
+	}
+}
+
+func TestDelete_NotFound(t *testing.T) {
+	repo := &mockRepository{}
+	err := newTestService(repo, &mockCache{}).Delete(context.Background(), uuid.New())
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if repo.deleteCalled {
+		t.Fatal("repository Delete should not be called")
+	}
+}
+
+func TestDelete_InvalidatesCache(t *testing.T) {
+	repo := &mockRepository{books: []book.Book{{Title: "1984"}}}
+	c := &mockCache{}
+	err := newTestService(repo, c).Delete(context.Background(), uuid.New())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !c.invalidateCalled {
+		t.Fatal("cache Invalidate should be called after delete")
 	}
 }

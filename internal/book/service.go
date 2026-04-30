@@ -21,26 +21,31 @@ type repository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
-type Service struct {
-	repo  repository
-	cache *Cache
+type bookCache interface {
+	Get(key string) ([]Book, bool)
+	Add(key string, value []Book)
+	Invalidate(key string)
+	Close()
 }
 
-func NewService(repo repository, cache *Cache) *Service {
+type Service struct {
+	repo  repository
+	cache bookCache
+}
+
+func NewService(repo repository, cache bookCache) *Service {
 	return &Service{repo: repo, cache: cache}
 }
 
 func (s *Service) GetAll(ctx context.Context) ([]Book, error) {
-	if books, ok := s.cache.get(cacheKey); ok {
+	if books, ok := s.cache.Get(cacheKey); ok {
 		return books, nil
 	}
-
 	books, err := s.repo.FindAll(ctx)
 	if err != nil {
 		return nil, err
 	}
-
-	s.cache.add(cacheKey, books)
+	s.cache.Add(cacheKey, books)
 	return books, nil
 }
 
@@ -70,7 +75,7 @@ func (s *Service) Create(ctx context.Context, authorID uuid.UUID, req CreateRequ
 	if err != nil {
 		return nil, err
 	}
-	s.cache.invalidate(cacheKey)
+	s.cache.Invalidate(cacheKey)
 	return b, nil
 }
 
@@ -92,7 +97,7 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) (
 	if err != nil {
 		return nil, err
 	}
-	s.cache.invalidate(cacheKey)
+	s.cache.Invalidate(cacheKey)
 	return b, nil
 }
 
@@ -107,6 +112,6 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 	if err := s.repo.Delete(ctx, id); err != nil {
 		return err
 	}
-	s.cache.invalidate(cacheKey)
+	s.cache.Invalidate(cacheKey)
 	return nil
 }

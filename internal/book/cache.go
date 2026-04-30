@@ -34,7 +34,7 @@ func NewCache(ttl time.Duration) *Cache {
 	return c
 }
 
-func (c *Cache) get(key string) ([]Book, bool) {
+func (c *Cache) Get(key string) ([]Book, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -45,11 +45,11 @@ func (c *Cache) get(key string) ([]Book, bool) {
 	return e.value, true
 }
 
-func (c *Cache) add(key string, value []Book) {
+func (c *Cache) Add(key string, value []Book) {
 	c.addCh <- addRequest{key: key, value: value}
 }
 
-func (c *Cache) invalidate(key string) {
+func (c *Cache) Invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.items, key)
