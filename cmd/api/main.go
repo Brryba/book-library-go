@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
@@ -27,8 +28,11 @@ func main() {
 		log.Fatalf("failed to ping database: %v", err)
 	}
 
+	bookCache := book.NewCache(5 * time.Minute)
+	defer bookCache.Close()
+
 	bookRepo := book.NewRepository(db)
-	bookService := book.NewService(bookRepo)
+	bookService := book.NewService(bookRepo, bookCache)
 	bookHandler := book.NewHandler(bookService)
 
 	authorRepo := author.NewRepository(db)

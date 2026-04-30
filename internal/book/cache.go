@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-type cache struct {
+type Cache struct {
 	mu      sync.RWMutex
 	items   map[string]cacheEntry
 	ttl     time.Duration
@@ -23,8 +23,8 @@ type addRequest struct {
 	value []Book
 }
 
-func newCache(ttl time.Duration) *cache {
-	c := &cache{
+func NewCache(ttl time.Duration) *Cache {
+	c := &Cache{
 		items:   make(map[string]cacheEntry),
 		ttl:     ttl,
 		addCh:   make(chan addRequest, 100),
@@ -34,7 +34,7 @@ func newCache(ttl time.Duration) *cache {
 	return c
 }
 
-func (c *cache) get(key string) ([]Book, bool) {
+func (c *Cache) get(key string) ([]Book, bool) {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
@@ -45,21 +45,21 @@ func (c *cache) get(key string) ([]Book, bool) {
 	return e.value, true
 }
 
-func (c *cache) add(key string, value []Book) {
+func (c *Cache) add(key string, value []Book) {
 	c.addCh <- addRequest{key: key, value: value}
 }
 
-func (c *cache) invalidate(key string) {
+func (c *Cache) invalidate(key string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	delete(c.items, key)
 }
 
-func (c *cache) close() {
+func (c *Cache) Close() {
 	close(c.closeCh)
 }
 
-func (c *cache) run() {
+func (c *Cache) run() {
 	ticker := time.NewTicker(c.ttl)
 	defer ticker.Stop()
 

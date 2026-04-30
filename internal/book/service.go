@@ -8,6 +8,8 @@ import (
 	"github.com/jackc/pgx/v5"
 )
 
+const cacheKey = "books:all"
+
 var ErrNotFound = errors.New("book not found")
 
 type repository interface {
@@ -20,15 +22,26 @@ type repository interface {
 }
 
 type Service struct {
-	repo repository
+	repo  repository
+	cache *Cache
 }
 
-func NewService(repo repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo repository, cache *Cache) *Service {
+	return &Service{repo: repo, cache: cache}
 }
 
 func (s *Service) GetAll(ctx context.Context) ([]Book, error) {
-	return s.repo.FindAll(ctx)
+	if books, ok := s.cache.get(cacheKey); ok {
+		return books, nil
+	}
+
+	books, err := s.repo.FindAll(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	s.cache.add(cacheKey, books)
+	return books, nil
 }
 
 func (s *Service) GetByID(ctx context.Context, id uuid.UUID) (*Book, error) {
@@ -53,7 +66,12 @@ func (s *Service) Create(ctx context.Context, authorID uuid.UUID, req CreateRequ
 	if req.Year < 1 {
 		return nil, errors.New("year must be positive")
 	}
-	return s.repo.Create(ctx, authorID, req)
+	b, err := s.repo.Create(ctx, authorID, req)
+	if err != nil {
+		return nil, err
+	}
+	s.cache.invalidate(cacheKey)
+	return b, nil
 }
 
 func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) (*Book, error) {
@@ -70,7 +88,12 @@ func (s *Service) Update(ctx context.Context, id uuid.UUID, req UpdateRequest) (
 		}
 		return nil, err
 	}
-	return s.repo.Update(ctx, id, req)
+	b, err := s.repo.Update(ctx, id, req)
+	if err != nil {
+		return nil, err
+	}
+	s.cache.invalidate(cacheKey)
+	return b, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
@@ -81,5 +104,9 @@ func (s *Service) Delete(ctx context.Context, id uuid.UUID) error {
 		}
 		return err
 	}
-	return s.repo.Delete(ctx, id)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
+	}
+	s.cache.invalidate(cacheKey)
+	return nil
 }
